@@ -1,0 +1,28 @@
+/* Layout child items horizontally, with a small gap wide enough for a focus highlight. */
+.flexLeftRight {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5vw;
+}
+
+.hidablePanel {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease-out;
+
+  &.visible {
+    max-height: 250px;
+    transition: max-height 0.3s ease-in;
+  }
+}
+
+/* Make text elements hide whatever doesn't fit in their given space. */
+.ellipsisOverflow {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+
+  /* These were useful on h4 and label elements */
+  display: block;
+  margin-bottom: 0px;
+}
