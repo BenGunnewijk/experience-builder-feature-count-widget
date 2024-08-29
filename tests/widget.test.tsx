@@ -1,133 +1,201 @@
-import { AllWidgetProps, React } from "jimu-core";
+import { Immutable, React, UseDataSource } from "jimu-core";
 import CountWidget from "../src/runtime/widget";
 import { widgetRender, wrapWidget } from "jimu-for-test";
-import { fireEvent, waitFor } from "@testing-library/react";
+import { act, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { CountWidgetConfig } from "../src/config";
-
-const onRender = () => {
-  console.log("Widget rendered");
-};
-const onTargetLayerViewChanged = (newLayerView) => {
-  console.log("Widget has new target layerview:");
-  console.log(newLayerView);
-};
-const defaultConfig: CountWidgetConfig = {
-  testing: { onRender, onTargetLayerViewChanged },
-};
+import defaultTranslations from "../src/runtime/translations/default";
 
 const render = widgetRender();
+const defaultConfig: CountWidgetConfig = {};
 const CountWidgetWithDefaults = wrapWidget(CountWidget, {
   config: defaultConfig,
 });
-// const CountWidgetWithDefaults = getWidgetWithDefaults(
-//   CountWidget,
-//   { config: defaultConfig }
-// );
 
-// Prepare a test environment for the widget where the feature count of layers can be "queried"
-jest.mock("jimu-core", () => {
-  return {
-    ...jest.requireActual("jimu-core"),
-    loadArcGISJSAPIModule: jest.fn().mockImplementation((moduleId) => {
-      let module;
-      if (moduleId === "esri/layers/FeatureLayer") {
-        module = jest.fn().mockImplementation(() => {
-          return {
-            queryFeatureCount: (query) => Promise.resolve(5),
-          };
-        });
-      }
-      return Promise.resolve(module);
-    }),
-  };
+// To prevent each console.log() from being ~5 lines of text
+const jestConsole = console;
+beforeEach(() => {
+  global.console = require("console");
+});
+afterEach(() => {
+  global.console = jestConsole;
 });
 
+// Name of functions that are used in jest.mock need to start with "mock"
+// Plus some other requirements: https://jestjs.io/docs/manual-mocks#using-with-es-module-imports
+function mockLayerView(id: string) {
+  return {
+    id: id,
+    layer: {
+      type: "feature",
+      load: () => Promise.resolve(null),
+    },
+    view: {
+      queryFeatureCount: (q) => 5,
+      createQuery: () => {
+        return { geometry: null };
+      },
+      view: { extent: "fake extent" },
+    },
+    whenCurrentLayerViewNotUpdating: () => {},
+  };
+}
+function mockLayerViews() {
+  return {
+    "mock-jimu-layerview-1": mockLayerView("mock-jimu-layerview-1"),
+    "mock-jimu-layerview-2": mockLayerView("mock-jimu-layerview-2"),
+  };
+}
+
+jest.mock("jimu-arcgis", () => ({
+  __esModule: true,
+  // requireActual of arcgis might slow things down needlessly (Part of copy-paste).
+  ...jest.requireActual("jimu-arcgis"),
+  MapViewManager: class {
+    static getInstance() {
+      return {
+        getAllJimuMapViews: () => {
+          return [
+            {
+              id: "mock-jimu-map-view",
+              getJimuLayerViewByDataSourceId: mockLayerViews,
+              whenJimuLayerViewLoaded: () => {},
+              whenAllJimuLayerViewLoaded: mockLayerViews,
+            },
+          ];
+        },
+      };
+    }
+  },
+}));
+
+/**
+ * A query that will match any of these:
+ * * `... / ... features`
+ * * `... / 1234 features`
+ * * `1234 / 1234 features`
+ */
+const titleRegexp = new RegExp(
+  `(([0-9]+|\.\.\.) \/ ([0-9]+|\.\.\.) ${defaultTranslations.countUnit})`,
+  "i"
+);
+
 describe("show-feature-count widget", () => {
-  it("renders important elements", () => {
+  it("renders important elements", async () => {
     // If the widget had config:
     // <Widget config={{ prop1: true }}></Widget>
 
-    const { container } = render(
-      <CountWidgetWithDefaults></CountWidgetWithDefaults>
-    );
+    // From the React docs: https://react.dev/reference/react/act#await-act-async-actfn
+    // await act(async () => { root.render(<TestComponent />) });
+    // From the error message when not using act:
+    // Awaiting the render ensures that you're testing the behavior the user would see in the browser.
+    // Learn more at https://reactjs.org/link/wrap-tests-with-act
+    const { getByText } = await act(async () => {
+      return render(<CountWidgetWithDefaults></CountWidgetWithDefaults>);
+    });
+
+    // getBy... is recommended over container.querySelector("h5#count-title")
+    // Those functions better follow the way a user would also look for the element.
+    // As a bonus, null-checks are handled by the testing library
+    let titleEle = getByText(titleRegexp);
 
     // Make sure the widget title is rendered.
     // The title is used to visualize the feature count and thus the most important.
-    let titleEle = container.querySelector("h5#count-title");
-    expect(titleEle).not.toBeNull();
+    expect(titleEle).toBeVisible();
+    expect(titleEle).toHaveRole("Title");
   });
 
-  it("can handle a re-render", () => {
-    const { container, rerender } = render(
-      <CountWidgetWithDefaults></CountWidgetWithDefaults>
-    );
-    rerender(<CountWidgetWithDefaults></CountWidgetWithDefaults>);
+  it("can handle a re-render", async () => {
+    const { rerender } = await act(async () => {
+      return render(<CountWidgetWithDefaults></CountWidgetWithDefaults>);
+    });
 
-    // Query an element in the re-rendered widget, just to be sure.
-    let titleEle = container.querySelector("h5#count-title");
-    expect(titleEle).not.toBeNull();
+    await act(async () => {
+      rerender(<CountWidgetWithDefaults></CountWidgetWithDefaults>);
+    });
+
+    // Maybe get an element in the re-rendered widget, just to be sure?
+  });
+
+  it("can handle layer definitions from useDataSources", async () => {
+    // It might be bad design to have a unit test create it's own mock object.
+    // For now it's the easiest way to adjust Widget properties per test.
+    const mockDatasources = Immutable([
+      { dataSourceId: "mock-datasource-id1" } as UseDataSource,
+      { dataSourceId: "mock-datasource-id2" } as UseDataSource,
+    ]);
+
+    const { getByText } = await act(async () => {
+      return render(
+        <CountWidgetWithDefaults
+          useDataSources={mockDatasources}
+        ></CountWidgetWithDefaults>
+      );
+    });
+
+    let titleEle = getByText(titleRegexp);
+    expect(titleEle).toBeVisible();
   });
 
   it("has a functioning refresh button", async () => {
-    function doStuffOnRender() {
-      console.log("Custom testing logic on widget render during testing.");
-      // Resolve Promise here, to indicate the widget has rendered (and has the new Count)
-    }
-    const { container } = render(
-      <CountWidgetWithDefaults
-        config={{ testing: { onRender: doStuffOnRender } }}
-      ></CountWidgetWithDefaults>
-    );
+    const { getByLabelText, getByText } = await act(async () => {
+      return render(<CountWidgetWithDefaults></CountWidgetWithDefaults>);
+    });
 
     // The test is not perfect since the widget will show the count before refresh as well.
     // The button click will just replace 5/5 with 5/5.
     // Well, at least it will verify that the click doesn't explode.
 
-    const buttonEle = container.querySelector("button#refresh-count");
-    expect(buttonEle).not.toBeNull();
-    if (buttonEle) fireEvent.click(buttonEle);
+    const buttonEle = getByLabelText(defaultTranslations.refreshCountTooltip);
 
-    const titleEle = container.querySelector("h5#count-title");
-    await waitFor(() => expect(titleEle).toHaveTextContent("5 / 5 features"));
+    // act should be also be used when firing events that update state.
+    // It looks weird since fireEvent.click is synchronous. But it does properly wait.
+    await act(async () => {
+      fireEvent.click(buttonEle);
+    });
+
+    let titleEle = getByText(titleRegexp);
+
+    expect(titleEle).toHaveTextContent("5 / 5 features");
   });
 
-  it("has a functioning settings button", () => {
-    const { container } = render(
-      <CountWidgetWithDefaults></CountWidgetWithDefaults>
-    );
+  it("has a functioning settings button", async () => {
+    const { getByLabelText } = await act(async () => {
+      return render(<CountWidgetWithDefaults></CountWidgetWithDefaults>);
+    });
 
-    const buttonEle = container.querySelector("button#show-settings");
-    expect(buttonEle).not.toBeNull();
-    if (buttonEle) fireEvent.click(buttonEle);
+    const buttonEle = getByLabelText(defaultTranslations.showSettingsTooltip);
 
-    // Instead, test if panel is expanded.
-    const panelEle = container.querySelector("div.hidablePanel");
-    expect(panelEle).toHaveClass("visible");
+    await act(async () => {
+      fireEvent.click(buttonEle);
+    });
+
+    // The select element is only visible when the panel is expanded.
+    // That is only the case after the settings button has been clicked.
+    const listSelectEle = getByLabelText(defaultTranslations.listSelectTooltip);
+    expect(listSelectEle).toBeVisible();
   });
 
-  it("has a functioning refresh layers button", () => {
-    const { container } = render(
-      <CountWidgetWithDefaults></CountWidgetWithDefaults>
-    );
+  it("has a functioning refresh layers button", async () => {
+    const { getByLabelText } = await act(async () => {
+      return render(<CountWidgetWithDefaults></CountWidgetWithDefaults>);
+    });
 
-    // The test is not perfect since the widget will show the count before refresh as well.
-    // The button click will just replace 5/5 with 5/5.
-    // Well, at least it will verify that the click doesn't explode.
+    const buttonEle = getByLabelText(defaultTranslations.refreshListTooltip);
 
-    const buttonEle = container.querySelector("button#refresh-list");
-    expect(buttonEle).not.toBeNull();
-    if (buttonEle) fireEvent.click(buttonEle);
+    await act(async () => {
+      fireEvent.click(buttonEle);
+    });
 
-    const selectEle = container.querySelector("select#layer-choice-select");
-    expect(selectEle).not.toBeNull();
-    // Expect 2 options in the dropdown. This is based on the number of targeted feature layers.
-    // TODO: Check how to mock FeatureLayers
-    if (selectEle) {
-      // This method seems worse, but the queryByRole method could be useful? (screen from @testing-library/react)
-      // screen.getAllByRole('option')
-      const optionEles = selectEle.querySelectorAll("option");
-      expect(optionEles.length).toBe(2);
-    }
+    // Check refresh results?
+  });
+
+  it("shows available layers in the select options", async () => {
+    const { getAllByRole } = await act(async () => {
+      return render(<CountWidgetWithDefaults></CountWidgetWithDefaults>);
+    });
+
+    const selectOptions = getAllByRole("option");
+    expect(selectOptions.length).toBe(2);
   });
 });

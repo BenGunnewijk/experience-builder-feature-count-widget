@@ -1,17 +1,10 @@
-import { JimuFeatureLayerView } from "jimu-arcgis";
 import { type ImmutableObject } from "jimu-core";
 
 // I'm no longer passing the selected map ID and layer ID to the widget through the props.
 // Instead I use props.useDataSources[]
 // Like it is used here:
 // https://github.com/Esri/arcgis-experience-builder-sdk-resources/tree/master/widgets/feature-layer-function
-export type CountWidgetConfig = {
-  /** These callbacks tell the unit tests how the state updated. */
-  testing?: {
-    onRender?: () => void;
-    onTargetLayerViewChanged?: (jimuView?: JimuFeatureLayerView) => void;
-  };
-};
+export type CountWidgetConfig = {};
 
 /**
  * A jimu-core ImmutableObject with the widget properties.

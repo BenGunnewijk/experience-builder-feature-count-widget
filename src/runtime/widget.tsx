@@ -1,5 +1,4 @@
 /** @jsx jsx */
-/** @jsxFrag jsx */
 import { useState, useCallback, useEffect } from "react";
 import { type AllWidgetProps, jsx, UseDataSource } from "jimu-core";
 import { JimuFeatureLayerView, MapViewManager } from "jimu-arcgis";
@@ -132,7 +131,7 @@ export default function Widget(props: AllWidgetProps<CountWidgetConfigIM>) {
     setIsSettingsOpen((v) => !v);
   }, []);
 
-  // on init, but that is now a side-effect.
+  // The update didn't properly trigger on init with the useDataSources dependencies.
   useEffect(() => {
     updateListOfFeatureLayers();
   }, []);
@@ -156,13 +155,7 @@ export default function Widget(props: AllWidgetProps<CountWidgetConfigIM>) {
   // When a new layer is selected, immediately poll the feature counts.
   useEffect(() => {
     updateCounts();
-    props.config.testing?.onTargetLayerViewChanged?.(targetLayerView);
   }, [targetLayerView]);
-
-  // Allow unit tests to await a render of the widget.
-  useEffect(() => {
-    props.config.testing?.onRender?.();
-  });
 
   return (
     <Card style={{ padding: 0 }}>
@@ -181,6 +174,7 @@ export default function Widget(props: AllWidgetProps<CountWidgetConfigIM>) {
               tabIndex={0}
               className="ellipsisOverflow"
               style={{ userSelect: "text" }}
+              role="Title"
             >
               {queryCount === null ? "..." : queryCount} /{" "}
               {totalCount === null ? "..." : totalCount}{" "}
@@ -213,14 +207,20 @@ export default function Widget(props: AllWidgetProps<CountWidgetConfigIM>) {
       </div>
       <CollapsablePanel isOpen={isSettingsOpen}>
         <div className="flexLeftRight" style={{ margin: 5 }}>
-          <label title="Select a layer to count" style={{ flex: 1 }}>
+          <label
+            title={fromLocalization("listSelectTooltip")}
+            style={{ flex: 1 }}
+          >
             <select
               id="layer-choice-select"
+              aria-label={fromLocalization("listSelectTooltip")}
               onChange={(e) => setCurrentLayerChoice(e.target.selectedIndex)}
               style={{ width: "100%" }}
             >
               {featureLayerViews.map((lView, i) => (
-                <option value={i}>{lView.layer.title}</option>
+                <option key={lView.id} value={i}>
+                  {lView.layer.title}
+                </option>
               ))}
             </select>
           </label>

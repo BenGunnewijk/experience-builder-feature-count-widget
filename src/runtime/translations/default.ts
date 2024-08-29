@@ -5,4 +5,5 @@ export default {
   refreshCountTooltip: "Refresh feature counts",
   showSettingsTooltip: "Show settings",
   refreshListTooltip: "Refresh list of Feature Layers",
+  listSelectTooltip: "Select a layer to count",
 };
